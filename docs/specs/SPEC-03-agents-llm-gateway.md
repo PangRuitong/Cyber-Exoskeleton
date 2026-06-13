@@ -1,0 +1,104 @@
+# SPEC-03 — 自动化代理与 LLM 网关 v1.0
+
+> 状态：Draft
+> 对应课程：[[06_Level-5 自动化代理]]
+> 吸收修复表条目：#3（端点认证）、#6（enrichment 校验与回填）、#7（digest 自触发）、#8（成本闸门）、#12（时区）——本 spec 是修复表 P1 区的主要落地载体
+> 关键词等级：MUST / SHOULD / MAY
+
+---
+
+## 1. 目标与非目标
+
+**目标**：三个 edge function——call-llm（网关）、enrich-thought（INSERT 触发的富化）、weekly-digest（cron 触发的周报）——使每条捕获自动获得 tags / category / summary，每周日产出学习摘要，且所有 LLM 调用经由单一可换提供商的出口。
+
+**非目标**（v1 不做）：
+- 邮件投递 digest（存回 thoughts 表即可，Discord /digest 命令是更顺手的查看方式，见延期项）
+- 流式响应、多轮对话式 agent（全部是单发 prompt → 单个结构化结果）
+- 自动重试风暴（失败标记 + 定时回填，不做指数退避的实时重试链）
+- 跨提供商的功能对齐（网关契约取最大公约数：prompt 进、text 出）
+
+## 2. 功能性需求
+
+| ID | 等级 | 需求 |
+|----|------|------|
+| FR-1 | MUST | call-llm 接受 {prompt, systemPrompt?, maxTokens?}，返回 {text}；提供商与模型由 LLM_PROVIDER / LLM_MODEL 环境变量决定 |
+| FR-2 | MUST | enrich-thought 由 thoughts INSERT webhook 触发，产出 tags（3–5 个）、category（枚举：idea/learning/question/reference/plan/reflection/digest）、summary（≤ 1 句）并 UPDATE 回原行 |
+| FR-3 | MUST | weekly-digest 汇总最近 7 天捕获，按 category 分组，生成主题总结 + 一个"正在探索的问题"，作为新行存入（category=digest） |
+| FR-4 | MUST | enrichment 维护状态机：enrichment_status ∈ pending / done / failed / skipped |
+| FR-5 | MUST | 每日回填任务：重试所有 failed 与超过 1 小时仍 pending 的行 |
+| FR-6 | SHOULD | digest 在内容不足（< 5 条）时跳过并留日志，不调用 LLM |
+| FR-7 | MAY | call-llm 记录每次调用的 token 用量到一张 llm_usage 表 |
+
+## 3. 非功能性需求
+
+| ID | 等级 | 需求 |
+|----|------|------|
+| NFR-1 | MUST | **预算闸门**：call-llm 维护每日调用计数，超过阈值（初始 200 次/日）拒绝并返回明确错误（修复表 #8） |
+| NFR-2 | MUST | digest cron 按 Phoenix 时间周日早 8 点 = 0 15 * * 0 UTC（修复表 #12；AZ 无夏令时，全年成立） |
+| NFR-3 | SHOULD | 富化端到端（INSERT → 列填上）≤ 30 秒 |
+
+## 4. 不变量
+
+| ID | 不变量 |
+|----|--------|
+| INV-1 | **网关强制**：任何函数 never 直接调用 LLM 提供商 API；唯一例外是 call-llm 自身。新增 agent 默认违反此条直至证明经由网关 |
+| INV-2 | **端点不裸奔**：call-llm / enrich-thought / weekly-digest 全部要求认证头；pg_cron 与 webhook 的调用配置必须携带凭据；凭据 never 明文写进 cron SQL（用 Vault 引用）（修复表 #3） |
+| INV-3 | **LLM 输出过闸**：enrichment 结果在写库前 must 通过校验——剥除 markdown 围栏、tags 为非空数组、category 落在枚举内、summary 非空。任一失败 → status=failed，never 写入半成品字段（修复表 #6；FTHB finding_validator 同款原则的迷你版） |
+| INV-4 | **不自吞**：enrich-thought 对 category=digest 的行直接 skipped；digest 的输出 never 再次进入富化（修复表 #7） |
+| INV-5 | **幂等**：同一行被重复触发富化，结果一致且不产生重复副作用（UPDATE 语义天然幂等，回填任务依赖此条） |
+| INV-6 | **去重**：内容 sha256 相同的行不重复调 LLM，直接复用已有富化结果（修复表 #8；FTHB enrichment cache 同款） |
+| INV-7 | webhook 类函数对调用方 always 返回 200（即使内部失败），失败信息进日志与 status 列，never 让 Supabase webhook 进入重试风暴 |
+| INV-8 | API key（ANTHROPIC_API_KEY 等）只存在于 Supabase Secrets；切换提供商的全部操作 = 改 LLM_PROVIDER + 加新 key，零代码改动 |
+
+## 5. 接口契约
+
+**call-llm**（POST，内部调用）
+- 入：Authorization 头 + { prompt: string, systemPrompt?: string, maxTokens?: number }
+- 出：200 { text } / 401 / 429 { error: "daily budget exceeded", count } / 502 { error }（上游提供商失败）
+
+**enrich-thought**（POST，仅由 database webhook 调用）
+- 入：Supabase webhook payload（record 含新行）
+- 出：always 200；副作用为 UPDATE 行 + status 变更
+
+**weekly-digest**（POST，仅由 pg_cron 调用）
+- 入：Authorization 头 + 空体
+- 出：200 { created: boolean, reason? }
+
+**schema 迁移**：tags text[] / category text / summary text / enriched_at timestamptz / enrichment_status text / content_hash text。迁移文件入仓库 supabase/migrations 并编号（FTHB 惯例）。
+
+## 6. 验收标准
+
+| ID | 验证步骤 | 必须观察到 |
+|----|----------|-----------|
+| AC-1 | 经 call-llm 发一个固定 prompt（正确认证） | 200 + 非空 text |
+| AC-2 | **负路径**：call-llm 无认证头 | 401，函数日志无上游调用 |
+| AC-3 | 保存一条 ≥ 3 句的想法 | 30 秒内该行 tags/category/summary 填上，status=done |
+| AC-4 | **负路径**：临时把 enrichment prompt 改坏使其返回非 JSON，保存新想法 | status=failed，三个富化列保持 null（无半成品），函数返回 200 |
+| AC-5 | 手动跑回填任务 | AC-4 那行被重试；prompt 修好后变 done |
+| AC-6 | 保存两条 content 完全相同的想法 | 第二条复用富化结果，llm 调用计数只 +1（看日志/用量表） |
+| AC-7 | 手动 Invoke weekly-digest（库内有 ≥ 5 条近 7 天数据） | 新增 category=digest 行；**该行 status=skipped，未被富化** |
+| AC-8 | 库内只有 < 5 条近 7 天数据时 Invoke digest | { created: false }，零 LLM 调用 |
+| AC-9 | 把每日预算阈值临时调成 1，连发两次 call-llm | 第二次 429 |
+| AC-10 | Secrets 里把 LLM_MODEL 换成另一个 Anthropic 模型，重跑 AC-1 | 生效且零代码改动（INV-8 的最小验证） |
+| AC-11 | 检查 cron 定义 | 0 15 * * 0，且 SQL 内无明文 key |
+
+## 7. 顺序与延期项
+
+**顺序**：迁移（schema + status + hash 列）→ call-llm + 预算闸门（AC-1/2/9/10）→ enrich-thought + 校验 + 去重（AC-3/4/6）→ webhook 配置（含 digest 跳过条件）→ 回填任务（AC-5）→ weekly-digest + cron（AC-7/8/11）。
+
+**延期项**：
+| 项 | 触发条件 |
+|----|----------|
+| Discord /digest 命令（按需出周报） | SPEC-01 与本 spec 均 Done 后，作为第一个跨 spec 功能 |
+| 第二提供商分支（openai/本地） | 真实出现切换需求时——不为假想的灵活性提前写分支 |
+| token 用量表 + 月度成本报告 | 月度 API 账单首次超过 $5 时 |
+| enrichment prompt 外置成文件（FTHB prompt_loader 模式） | 第三次修改分类口径时 |
+
+## 8. 开放问题
+
+- [ ] 回填任务的实现位置：独立 cron 函数，还是并进 weekly-digest 函数顺带跑？倾向独立（职责单一），但多一个函数多一个端点要守 INV-2
+- [ ] category 枚举要不要从一开始就外置（数据库 enum 或配置）？v1 先硬编码在校验里，与 prompt 外置同批改
+
+---
+
+[[SPEC-02 MCP 服务器]] · [[SPEC-01 Discord + Siri 捕获通道]] · [[07_升级路线 - Edge Cases 修复表]]
