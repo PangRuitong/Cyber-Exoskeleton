@@ -188,17 +188,24 @@ async function callOpenAi(
   }
   messages.push({ role: "user", content: prompt });
 
+  const body: Record<string, unknown> = {
+    model,
+    max_completion_tokens: maxTokens,
+    messages,
+  };
+
+  const reasoningEffort = Deno.env.get("LLM_REASONING_EFFORT")?.trim();
+  if (reasoningEffort) {
+    body.reasoning_effort = reasoningEffort;
+  }
+
   const response = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: {
       "authorization": `Bearer ${apiKey}`,
       "content-type": "application/json",
     },
-    body: JSON.stringify({
-      model,
-      max_tokens: maxTokens,
-      messages,
-    }),
+    body: JSON.stringify(body),
   });
 
   const responseText = await response.text();
