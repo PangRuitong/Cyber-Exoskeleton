@@ -226,6 +226,10 @@ async function processThought(
   try {
     if (record.source === "digest" || record.category === "digest") {
       await supabase.from("thoughts").update({
+        tags: null,
+        category: null,
+        summary: null,
+        enriched_at: null,
         enrichment_status: "skipped",
         error_message: null,
       }).eq("id", id);
