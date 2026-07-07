@@ -1,2 +1,17 @@
 [functions.discord-bot]
 verify_jwt = false
+
+[functions.call-llm]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/call-llm/index.ts"
+
+[functions.enrich-thought]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/enrich-thought/index.ts"
+
+[functions.weekly-digest]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/weekly-digest/index.ts"
