@@ -7,3 +7,15 @@ supabase/.temp/
 .agents/
 .claude/
 skills-lock.json
+backup_2026-07-16_pre-spec05.sql
+
+# Local Codex/MCP configuration can contain bearer credentials.
+.codex/
+
+# Private operational evidence and personal brain exports.
+ErrorScreenSHot/
+test.md
+
+# Retrieval fixtures and raw runs are derived from the private thought corpus.
+eval/golden_set.json
+eval/runs/*.json

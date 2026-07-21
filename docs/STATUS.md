@@ -17,16 +17,20 @@
 
 ### Spec 实施（依赖地基全部完成）
 
-- [ ] **SPEC-01 — Discord + Siri 捕获通道**
-  产出物/验证：AC-1 到 AC-9 全部通过（见 docs/specs/SPEC-01-capture-channels.md §6）
+> 说明：Level 1–2 保留课程原版前端验收口径，目前未在本仓库重新验收；
+> 下列 Spec 状态按各自 AC 的后端实施证据记录。
 
-- [ ] **SPEC-02 — MCP 服务器**
-  产出物/验证：AC-1 到 AC-8 全部通过（见 docs/specs/SPEC-02-mcp-server.md §6）
-
-- [ ] **SPEC-03 — 自动化代理与 LLM 网关**
-  产出物/验证：AC-1 到 AC-11 全部通过（见 docs/specs/SPEC-03-agents-llm-gateway.md §6）
+- [x] **SPEC-00 — Done**
+- [x] **SPEC-01 — Done**
+- [x] **SPEC-02 — Done**
+- [x] **SPEC-03 — Done**
+- [x] **SPEC-04 — Done**（2026-07-16；真实基线仅本地保存，公开仓库提供 eval 格式示例）
+- [x] **SPEC-08 — Done**
+- [x] **SPEC-05 — Done**（2026-07-17；十条 AC 全绿）
+- [x] **SPEC-06 — Done**（2026-07-19；十条 AC 全绿）
+- [x] **SPEC-07 — Done**（2026-07-20；Hybrid recall@10 0.9487，B 层 1.0，P95 1244ms）
 
 ---
 
-最近更新：2026-06-12
-当前下一步：完成 Level 1 — 建 Supabase 项目，创建 thoughts 表，配置 config.js，部署到 Vercel
+最近更新：2026-07-20
+当前下一步：RAG 04→07 弧线已收官；按 Vault 后续派活推进。

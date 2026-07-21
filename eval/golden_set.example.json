@@ -1,0 +1,20 @@
+{
+  "meta": {
+    "approved_by": "REPLACE_ME",
+    "approved_date": "YYYY-MM-DD",
+    "note": "Public schema example only. Expand to at least 30 synthetic or approved entries before running."
+  },
+  "entries": [
+    {
+      "id": "gs-001",
+      "query": "example exact-match query",
+      "expected_thought_ids": [
+        "00000000-0000-4000-8000-000000000001"
+      ],
+      "stratum": "A",
+      "lang": "en",
+      "notes": "Replace with an approved fixture from your own corpus.",
+      "added": "YYYY-MM-DD"
+    }
+  ]
+}

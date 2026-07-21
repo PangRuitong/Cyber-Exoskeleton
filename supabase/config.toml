@@ -11,7 +11,34 @@ enabled = true
 verify_jwt = false
 entrypoint = "./functions/enrich-thought/index.ts"
 
+[functions.chunk-thought]
+enabled = true
+verify_jwt = false
+entrypoint = "./functions/chunk-thought/index.ts"
+
 [functions.weekly-digest]
 enabled = true
 verify_jwt = false
 entrypoint = "./functions/weekly-digest/index.ts"
+
+[functions.call-embedding]
+enabled = true
+verify_jwt = false
+import_map = "./functions/call-embedding/deno.json"
+# Uncomment to specify a custom file path to the entrypoint.
+# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
+entrypoint = "./functions/call-embedding/index.ts"
+# Specifies static files to be bundled with the function. Supports glob patterns.
+# For example, if you want to serve static HTML pages in your function:
+# static_files = [ "./functions/call-embedding/*.html" ]
+
+[functions.embed-chunks]
+enabled = true
+verify_jwt = false
+import_map = "./functions/embed-chunks/deno.json"
+# Uncomment to specify a custom file path to the entrypoint.
+# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
+entrypoint = "./functions/embed-chunks/index.ts"
+# Specifies static files to be bundled with the function. Supports glob patterns.
+# For example, if you want to serve static HTML pages in your function:
+# static_files = [ "./functions/embed-chunks/*.html" ]

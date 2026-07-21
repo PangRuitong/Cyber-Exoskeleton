@@ -9,7 +9,10 @@ type RequestBody = {
   prompt?: unknown;
   systemPrompt?: unknown;
   maxTokens?: unknown;
+  effort?: unknown;
 };
+
+type ReasoningEffort = "none" | "low" | "medium" | "high";
 
 function json(status: number, body: unknown) {
   return new Response(JSON.stringify(body), {
@@ -57,6 +60,23 @@ function normalizeMaxTokens(value: unknown) {
   return Math.floor(value);
 }
 
+function normalizeEffort(value: unknown) {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (
+    value === "none" ||
+    value === "low" ||
+    value === "medium" ||
+    value === "high"
+  ) {
+    return value;
+  }
+
+  return null;
+}
+
 function summarizeUpstreamError(value: string) {
   let message = value.trim();
 
@@ -98,9 +118,9 @@ async function incrementDailyUsage() {
 
   try {
     const result = await client.queryObject<{ count: number }>`
-      insert into public.llm_daily_usage (day, count)
-      values (current_date, 1)
-      on conflict (day) do update
+      insert into public.llm_daily_usage (day, kind, count)
+      values (current_date, 'llm', 1)
+      on conflict (day, kind) do update
         set count = public.llm_daily_usage.count + 1
       returning count
     `;
@@ -171,6 +191,7 @@ async function callOpenAi(
   prompt: string,
   systemPrompt: string | undefined,
   maxTokens: number,
+  effort: ReasoningEffort | undefined,
 ) {
   const apiKey = Deno.env.get("OPENAI_API_KEY")?.trim() ?? "";
   if (!apiKey) {
@@ -194,7 +215,7 @@ async function callOpenAi(
     messages,
   };
 
-  const reasoningEffort = Deno.env.get("LLM_REASONING_EFFORT")?.trim();
+  const reasoningEffort = effort ?? Deno.env.get("LLM_REASONING_EFFORT")?.trim();
   if (reasoningEffort) {
     body.reasoning_effort = reasoningEffort;
   }
@@ -252,6 +273,10 @@ async function handleRequest(req: Request) {
   if (maxTokens === null) {
     return json(400, { error: "invalid request" });
   }
+  const effort = normalizeEffort(body.effort);
+  if (effort === null) {
+    return json(400, { error: "invalid request" });
+  }
 
   let count: number;
   try {
@@ -267,11 +292,12 @@ async function handleRequest(req: Request) {
   const provider = Deno.env.get("LLM_PROVIDER")?.trim().toLowerCase() ?? "";
   try {
     if (provider === "anthropic") {
+      // Anthropic does not consume the OpenAI reasoning effort option.
       return await callAnthropic(prompt, systemPrompt, maxTokens);
     }
 
     if (provider === "openai") {
-      return await callOpenAi(prompt, systemPrompt, maxTokens);
+      return await callOpenAi(prompt, systemPrompt, maxTokens, effort);
     }
 
     return json(502, { error: "unknown provider" });
