@@ -1,6 +1,7 @@
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { Client } from "https://deno.land/x/postgres@v0.17.0/mod.ts";
 import nacl from "npm:tweetnacl@1.0.3";
+import { type HybridSearchRow, runHybridSearch } from "../_shared/hybrid-search.ts";
 
 declare const EdgeRuntime: {
   waitUntil(promise: Promise<unknown>): void;
@@ -151,10 +152,6 @@ function getStringOption(interaction: DiscordInteraction, name: string) {
   return typeof option?.value === "string" ? option.value : null;
 }
 
-function escapeLikePattern(value: string) {
-  return value.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_");
-}
-
 function limitDiscordMessage(content: string) {
   if (content.length <= maxDiscordContentChars) {
     return content;
@@ -203,6 +200,42 @@ function formatThoughtRows(rows: ThoughtRow[]) {
 
 function toThoughtRow(value: unknown): ThoughtRow {
   return value as ThoughtRow;
+}
+
+function formatChunkPreview(row: HybridSearchRow) {
+  if (row.content.length <= maxThoughtPreviewChars) {
+    return row.content;
+  }
+
+  const remaining = row.content.length - maxThoughtPreviewChars;
+  return `${row.content.slice(0, maxThoughtPreviewChars)}...[truncated ${remaining} chars, full content in thought id=${row.thought_id}]`;
+}
+
+function formatHybridRowsForDiscord(rows: HybridSearchRow[], degraded: boolean) {
+  const notice = degraded
+    ? "⚠️ 语义检索暂不可用（已降级为关键词匹配，中文可能漏召回）\n\n"
+    : "";
+  if (rows.length === 0) {
+    return `${notice}No matching thoughts found.`;
+  }
+
+  const seen = new Set<string>();
+  const lines: string[] = [];
+  let n = 0;
+  for (const row of rows) {
+    if (seen.has(row.thought_id)) continue;
+    seen.add(row.thought_id);
+    n += 1;
+    const source = row.source ?? "unknown";
+    const nextLine = `${n}. ${row.created_at} source=${source} id=${row.thought_id}\n${formatChunkPreview(row)}`;
+    if ((notice + [...lines, nextLine].join("\n\n")).length > maxDiscordContentChars) {
+      lines.push("...[results too long, showing fewer]");
+      break;
+    }
+    lines.push(nextLine);
+  }
+
+  return `${notice}${lines.join("\n\n")}`;
 }
 
 function getErrorDedupWindowSeconds() {
@@ -474,23 +507,12 @@ async function handleSearch(interaction: DiscordInteraction) {
     throw new CommandError(500, "database_configuration_missing");
   }
 
-  const { data, error } = await supabase
-    .from("thoughts")
-    .select("id,content,created_at,source")
-    .ilike("content", `%${escapeLikePattern(query)}%`)
-    .order("created_at", { ascending: false })
-    .limit(5);
-
-  if (error) {
-    throw new CommandError(500, "database_search_failed", error);
+  const result = await runHybridSearch(supabase, query, {}, 5);
+  if (!result.ok) {
+    throw new CommandError(result.status, result.reason, result.cause);
   }
 
-  const rows = (data ?? []).map(toThoughtRow);
-  if (rows.length === 0) {
-    return "No matching thoughts found.";
-  }
-
-  return formatThoughtRows(rows);
+  return formatHybridRowsForDiscord(result.rows, result.degraded);
 }
 
 async function handleRecent() {
